@@ -10,8 +10,8 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import javax.annotation.PostConstruct;
 
-import org.onebusaway.gtfs_realtime.exporter.GtfsRealtimeFullUpdate;
 import org.onebusaway.gtfs_realtime.exporter.GtfsRealtimeGuiceBindingTypes.MixedFeed;
+import org.onebusaway.gtfs_realtime.exporter.GtfsRealtimeIncrementalUpdate;
 import org.onebusaway.gtfs_realtime.exporter.GtfsRealtimeSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,16 +21,12 @@ import com.google.inject.Singleton;
 import com.google.transit.realtime.GtfsRealtime;
 import com.google.transit.realtime.GtfsRealtime.FeedEntity;
 import com.google.transit.realtime.GtfsRealtime.FeedMessage;
-//import com.google.transit.realtime.GtfsRealtime.TripDescriptor;
-//import com.google.transit.realtime.GtfsRealtime.TripUpdate;
-//import com.google.transit.realtime.GtfsRealtime.TripUpdate.StopTimeEvent;
-//import com.google.transit.realtime.GtfsRealtime.TripUpdate.StopTimeUpdate;
 
-//@SuppressWarnings("restriction")
+@SuppressWarnings("restriction")
 @Singleton
 public class MixedFeedProducer {
 
-    private final Logger logger = LoggerFactory.getLogger(MixedFeedProducer.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MixedFeedProducer.class);
     
     private GtfsRealtimeSink mixedFeedSink;
 
@@ -51,8 +47,8 @@ public class MixedFeedProducer {
 
     private void runLoop() {
         while (true) {
-            // Create full update
-            GtfsRealtimeFullUpdate fullUpdate = new GtfsRealtimeFullUpdate();
+            // Create incremental update
+            GtfsRealtimeIncrementalUpdate update = new GtfsRealtimeIncrementalUpdate();
             
 //            {
 //                FeedEntity.Builder entity = FeedEntity.newBuilder();
@@ -73,7 +69,7 @@ public class MixedFeedProducer {
 //                fullUpdate.addEntity(entity.build());
 //            }
             
-            logger.info("Starting with empty gtfs-rt dataset.");
+            LOG.info("Starting with empty gtfs-rt dataset.");
             
             // Get all pb files in working directory
             File workingDir = new File(".");
@@ -84,28 +80,34 @@ public class MixedFeedProducer {
                 }
             });
             
-            // Read each of them and combine them in one big dataset
+            // Read each of them and combine them in one big update
             for (File file : files) {
-                FileInputStream is;
+                FileInputStream is = null;
                 try {
                     is = new FileInputStream(file);
                     FeedMessage feed = GtfsRealtime.FeedMessage.parseFrom(is);
-                    // Add all entities to full dataset
+                    // Add all entities to incremental update
                     for (FeedEntity entity : feed.getEntityList()) {
-                        fullUpdate.addEntity(entity);
+                        update.addUpdatedEntity(entity);
                     }
-                    logger.info("Added entities of {} to gtfs-rt dataset.", file);
+                    LOG.info("Added entities of {} to gtfs-rt dataset.", file);
                 } catch (FileNotFoundException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
+                    LOG.warn("Error while opening file:", e);;
                 } catch (IOException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
+                    LOG.warn("Error while opening file:", e);;
+                } finally {
+                    try {
+                        if (is != null) {
+                            is.close();
+                        }
+                    } catch (IOException e) {
+                        LOG.warn("Error while closing file:", e);;
+                    }
                 }
             }
             
-            this.mixedFeedSink.handleFullUpdate(fullUpdate);
-            logger.info("Created gtfs-rt full dataset.");
+            this.mixedFeedSink.handleIncrementalUpdate(update);
+            LOG.info("Created gtfs-rt incremental update.");
             
             // Sleep for awhile
             try {
